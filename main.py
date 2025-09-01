@@ -164,13 +164,6 @@ class GameGrid:
                     for col_idx, square in enumerate(row):
                         square.center_x = square.x + square_width // 2
                         square.center_y = square.y + square_height // 2
-                        
-                        # Print debug info for first and last cells of each row
-                        if col_idx == 0 or col_idx == len(row) - 1:
-                            print(f"  Cell[{row_idx}][{col_idx}]: "
-                                  f"({square.x},{square.y}) -> "
-                                  f"({square.center_x},{square.center_y}) "
-                                  f"size={square_width}x{square_height}")
         
         # Update dimensions based on organized grid
         self.rows = len(self.grid)
@@ -204,6 +197,10 @@ class GameGrid:
                     lines.append(f"CELL {row_idx:02d}{col_idx:02d} - INVALID\n")
                 
         return "\n".join(lines)
+
+# Global variables to track window position
+_window_x = 0
+_window_y = 0
 
 # Flag to track if minimize_other_windows has been called
 _minimize_called = False
@@ -364,13 +361,15 @@ def check_game_status(window, check_interval=0.5):
             check_game_status.grid_detector = GridSquareDetector(template_path)
             check_game_status.game_grid = GameGrid()
         
-        # Get window position and size
-        x, y, w, h = window.left, window.top, window.width, window.height
+        # Get window position and size and update globals
+        global _window_x, _window_y
+        _window_x, _window_y = window.left, window.top
+        w, h = window.width, window.height
         
         # Take a screenshot of the window
         with mss.mss() as sct:
-            # The screen part to capture
-            monitor = {"top": y, "left": x, "width": w, "height": h}
+            # The screen part to capture - use window coordinates
+            monitor = {"top": _window_y, "left": _window_x, "width": w, "height": h}
             
             # Grab the data
             sct_img = sct.grab(monitor)
@@ -426,8 +425,8 @@ def check_game_status(window, check_interval=0.5):
             center_x, center_y = select_random_cell(game_grid)
             print(f"Selected cell center point: ({center_x}, {center_y})")
             
-            # Click the selected cell
-            click_at(center_x, center_y)
+            # Click the selected cell, passing the game_grid for square dimensions
+            click_at(center_x, center_y, game_grid)
             
             # Start the main game loop
             main_loop(game_grid)
@@ -447,30 +446,45 @@ def check_game_status(window, check_interval=0.5):
         print(f"Error checking game status: {e}")
         return False
 
-def click_at(x: int, y: int) -> None:
+def click_at(x: int, y: int, game_grid: Optional[GameGrid] = None) -> None:
     """
     Move the mouse to the specified coordinates and perform a left click.
     Adds visual feedback and verifies coordinates before clicking.
     
     Args:
-        x: The x-coordinate to click
-        y: The y-coordinate to click
+        x: The x-coordinate to click (relative to game window)
+        y: The y-coordinate to click (relative to game window)
+        game_grid: Optional GameGrid instance for square dimensions
     """
     try:
         # Get screen size for validation
         screen_width, screen_height = pyautogui.size()
         
+        # Get square dimensions from game grid if available
+        square_width = 0
+        square_height = 0
+        if game_grid and hasattr(game_grid, 'grid') and game_grid.grid and len(game_grid.grid) > 0:
+            first_row = game_grid.grid[0]
+            if len(first_row) > 1:
+                square_width = first_row[1].x - first_row[0].x
+                square_height = (game_grid.grid[1][0].y - game_grid.grid[0][0].y) if len(game_grid.grid) > 1 else square_width
+        
+        # Convert to screen coordinates, adjusting by half the square size if available
+        screen_x = _window_x + x - (square_width // 2) if square_width else _window_x + x
+        screen_y = _window_y + y - (square_height // 2) if square_height else _window_y + y
+        
         # Validate coordinates
-        if x < 0 or y < 0 or x > screen_width or y > screen_height:
-            print(f"⚠️  WARNING: Coordinates ({x}, {y}) are outside screen boundaries!")
+        if screen_x < 0 or screen_y < 0 or screen_x > screen_width or screen_y > screen_height:
+            print(f"⚠️  WARNING: Coordinates ({x},{y}) window-relative or ({screen_x},{screen_y}) screen-relative are outside screen boundaries!")
             print(f"   Screen size: {screen_width}x{screen_height}")
+            print(f"   Window position: ({_window_x}, {_window_y})")
             return
-            
+        
         print(f"\n=== Attempting to click at ({x}, {y}) ===")
         
         # Move to the coordinates with visual feedback
-        print("Moving to coordinates...")
-        pyautogui.moveTo(x, y, duration=0.5)
+        print(f"Moving to coordinates: Window-relative=({x},{y}), Screen-absolute=({screen_x},{screen_y})")
+        pyautogui.moveTo(screen_x, screen_y, duration=0.5)
         
         # Get actual position after move
         actual_x, actual_y = pyautogui.position()
@@ -480,12 +494,12 @@ def click_at(x: int, y: int) -> None:
         # Visual feedback (highlight the click position)
         original_pos = pyautogui.position()
         for _ in range(2):  # Flash the cursor
-            pyautogui.moveTo(x + 5, y + 5, duration=0.1)
-            pyautogui.moveTo(x - 5, y - 5, duration=0.1)
-        pyautogui.moveTo(x, y, duration=0.1)
+            pyautogui.moveTo(screen_x + 5, screen_y + 5, duration=0.1)
+            pyautogui.moveTo(screen_x - 5, screen_y - 5, duration=0.1)
+        pyautogui.moveTo(screen_x, screen_y, duration=0.1)
         
-        # Perform the click
-        print("Clicking...")
+        # Perform the click at screen coordinates
+        print(f"Clicking at screen coordinates: ({screen_x}, {screen_y})")
         pyautogui.click()
         
         print(f"✅ Successfully clicked at ({x}, {y})")
