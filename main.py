@@ -1,19 +1,44 @@
-import time
+# Set DPI awareness before any other imports or operations
+import os
 import sys
-import subprocess
-import pygetwindow as gw
 import ctypes
+
+# Set DPI awareness flags before any GUI operations
+if sys.platform == 'win32':
+    # Try to set DPI awareness through multiple methods
+    try:
+        # Windows 8.1+
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+    except:
+        try:
+            # Windows Vista+
+            ctypes.windll.user32.SetProcessDPIAware()
+        except:
+            pass  # Fall back to system DPI awareness
+
+# Set environment variables for GUI libraries
+os.environ['PYAUTOGUI_WINDOW_DPIAWARE'] = '1'
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+
+# Now import other modules
+import time
+import subprocess
 import random
 import psutil
-import os
 import cv2
 import numpy as np
 import mss
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional, Callable
 
+# Import GUI-related modules after DPI is set
+import pygetwindow as gw
+import pyautogui
+# Configure pyautogui
+pyautogui.PAUSE = 0
+pyautogui.FAILSAFE = False
+
 from board_detector import GridSquareDetector
-import time
 
 @dataclass
 class GridSquare:
@@ -105,6 +130,9 @@ class GameGrid:
         if not self.squares:
             return
             
+        print("\n=== Organizing Grid ===")
+        print(f"Total squares: {len(self.squares)}")
+            
         # Group squares by their y-coordinate (rows)
         rows = {}
         for square in self.squares:
@@ -129,11 +157,20 @@ class GameGrid:
                 square_width = first_row[1].x - first_row[0].x
                 square_height = (self.grid[1][0].y - self.grid[0][0].y) if len(self.grid) > 1 else square_width
                 
+                print(f"Calculated square size: {square_width}x{square_height}")
+                
                 # Update center coordinates for all squares
-                for row in self.grid:
-                    for square in row:
+                for row_idx, row in enumerate(self.grid):
+                    for col_idx, square in enumerate(row):
                         square.center_x = square.x + square_width // 2
                         square.center_y = square.y + square_height // 2
+                        
+                        # Print debug info for first and last cells of each row
+                        if col_idx == 0 or col_idx == len(row) - 1:
+                            print(f"  Cell[{row_idx}][{col_idx}]: "
+                                  f"({square.x},{square.y}) -> "
+                                  f"({square.center_x},{square.center_y}) "
+                                  f"size={square_width}x{square_height}")
         
         # Update dimensions based on organized grid
         self.rows = len(self.grid)
@@ -389,6 +426,9 @@ def check_game_status(window, check_interval=0.5):
             center_x, center_y = select_random_cell(game_grid)
             print(f"Selected cell center point: ({center_x}, {center_y})")
             
+            # Click the selected cell
+            click_at(center_x, center_y)
+            
             # Start the main game loop
             main_loop(game_grid)
             
@@ -406,6 +446,59 @@ def check_game_status(window, check_interval=0.5):
     except Exception as e:
         print(f"Error checking game status: {e}")
         return False
+
+def click_at(x: int, y: int) -> None:
+    """
+    Move the mouse to the specified coordinates and perform a left click.
+    Adds visual feedback and verifies coordinates before clicking.
+    
+    Args:
+        x: The x-coordinate to click
+        y: The y-coordinate to click
+    """
+    try:
+        # Get screen size for validation
+        screen_width, screen_height = pyautogui.size()
+        
+        # Validate coordinates
+        if x < 0 or y < 0 or x > screen_width or y > screen_height:
+            print(f"⚠️  WARNING: Coordinates ({x}, {y}) are outside screen boundaries!")
+            print(f"   Screen size: {screen_width}x{screen_height}")
+            return
+            
+        print(f"\n=== Attempting to click at ({x}, {y}) ===")
+        
+        # Move to the coordinates with visual feedback
+        print("Moving to coordinates...")
+        pyautogui.moveTo(x, y, duration=0.5)
+        
+        # Get actual position after move
+        actual_x, actual_y = pyautogui.position()
+        print(f"Actual position: ({actual_x}, {actual_y})")
+        print(f"Offset from target: ({actual_x - x}, {actual_y - y})")
+        
+        # Visual feedback (highlight the click position)
+        original_pos = pyautogui.position()
+        for _ in range(2):  # Flash the cursor
+            pyautogui.moveTo(x + 5, y + 5, duration=0.1)
+            pyautogui.moveTo(x - 5, y - 5, duration=0.1)
+        pyautogui.moveTo(x, y, duration=0.1)
+        
+        # Perform the click
+        print("Clicking...")
+        pyautogui.click()
+        
+        print(f"✅ Successfully clicked at ({x}, {y})")
+        
+    except Exception as e:
+        print(f"❌ Error clicking at ({x}, {y}): {e}")
+        # Try to get the current mouse position for debugging
+        try:
+            current_x, current_y = pyautogui.position()
+            print(f"Current mouse position: ({current_x}, {current_y})")
+        except:
+            print("Could not get current mouse position")
+
 
 def select_random_cell(game_grid: GameGrid) -> Tuple[int, int]:
     """
@@ -433,9 +526,26 @@ def select_random_cell(game_grid: GameGrid) -> Tuple[int, int]:
     # Get the cell
     cell = grid[row][col]
     
-    # Log the selection
-    print(f"\n=== Selected Random Cell ===")
-    print(f"Row: {row}, Column: {col}")
+    # Log the selection with detailed information
+    print("\n=== Selected Random Cell ===")
+    print(f"Grid dimensions: {rows}x{cols}")
+    print(f"Selected cell: Row {row}, Column {col}")
+    print(f"Top-left coordinates: ({cell.x}, {cell.y})")
+    print(f"Center coordinates: ({cell.center_x}, {cell.center_y})")
+    
+    # Calculate the expected center based on adjacent cells
+    if row > 0 and col > 0 and row < rows - 1 and col < cols - 1:
+        # Calculate average width and height from adjacent cells
+        width_right = grid[row][col+1].x - cell.x
+        width_left = cell.x - grid[row][col-1].x
+        height_below = grid[row+1][col].y - cell.y
+        height_above = cell.y - grid[row-1][col].y
+        
+        avg_width = (width_right + width_left) // 2
+        avg_height = (height_below + height_above) // 2
+        
+        print(f"Calculated cell size: ~{avg_width}x{avg_height}")
+        print(f"Expected center: ({cell.x + avg_width//2}, {cell.y + avg_height//2})")
     
     return cell.center_x, cell.center_y
 
