@@ -3,6 +3,7 @@ import sys
 import subprocess
 import pygetwindow as gw
 import ctypes
+import random
 import psutil
 import os
 import cv2
@@ -381,10 +382,15 @@ def check_game_status(window, check_interval=0.5):
             # print("-" * 80)
             
             # Set up the game state
-            check_game_status.game_grid.game_state.grid = check_game_status.game_grid
+            game_grid = check_game_status.game_grid
+            game_grid.game_state.grid = game_grid
+            
+            # Select and log a random cell for the first move
+            center_x, center_y = select_random_cell(game_grid)
+            print(f"Selected cell center point: ({center_x}, {center_y})")
             
             # Start the main game loop
-            main_loop(check_game_status.game_grid)
+            main_loop(game_grid)
             
             return False  # Stop checking and proceed to next step
         
@@ -400,6 +406,39 @@ def check_game_status(window, check_interval=0.5):
     except Exception as e:
         print(f"Error checking game status: {e}")
         return False
+
+def select_random_cell(game_grid: GameGrid) -> Tuple[int, int]:
+    """
+    Select a random cell from the grid and log its details.
+    
+    Args:
+        game_grid: The game grid containing all the squares
+        
+    Returns:
+        Tuple[int, int]: The (center_x, center_y) coordinates of the selected cell
+    """
+    grid = game_grid.get_grid_representation()
+    if not grid or not grid[0]:
+        print("No grid available for cell selection")
+        return -1, -1
+    
+    # Get grid dimensions
+    rows = len(grid)
+    cols = len(grid[0])
+    
+    # Select a random cell
+    row = random.randint(0, rows - 1)
+    col = random.randint(0, cols - 1)
+    
+    # Get the cell
+    cell = grid[row][col]
+    
+    # Log the selection
+    print(f"\n=== Selected Random Cell ===")
+    print(f"Row: {row}, Column: {col}")
+    
+    return cell.center_x, cell.center_y
+
 
 def main_loop(game_grid: GameGrid) -> None:
     """
