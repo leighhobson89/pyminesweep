@@ -29,7 +29,7 @@ import cv2
 import numpy as np
 import mss
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Optional, Callable
+from typing import List, Tuple, Dict, Optional, Callable, Union
 
 # Import GUI-related modules after DPI is set
 import pygetwindow as gw
@@ -214,27 +214,138 @@ class GameGrid:
             3. Handle special cases (flags, question marks, etc.)
             4. Update game state based on any changes
         """
+        print("\n=== Starting update_cell_states ===")
+        
         if not hasattr(self, 'grid') or not self.grid:
+            print("Error: No grid initialized")
             return
             
-        # 1. Take screenshot of the game area
-        #    - Use window coordinates to capture just the game board
-        #    - Consider adding a small border around each cell for better matching
+        print("1. Taking screenshot...")
+        screenshot = take_screenshot(window, save_path=None)
+        if screenshot is None:
+            print("Error: Failed to take screenshot")
+            return
+            
+        print("2. Loading template images...")
+        templates = {
+            '1': cv2.imread(os.path.join('resources', '1.png'), cv2.IMREAD_COLOR),
+            '2': cv2.imread(os.path.join('resources', '2.png'), cv2.IMREAD_COLOR),
+            '3': cv2.imread(os.path.join('resources', '3.png'), cv2.IMREAD_COLOR),
+            '4': cv2.imread(os.path.join('resources', '4.png'), cv2.IMREAD_COLOR),
+            '5': cv2.imread(os.path.join('resources', '5.png'), cv2.IMREAD_COLOR),
+            'empty': cv2.imread(os.path.join('resources', 'empty.png'), cv2.IMREAD_COLOR),
+            'hidden': cv2.imread(os.path.join('resources', 'gridSquare.png'), cv2.IMREAD_COLOR)
+        }
         
-        # 2. For each cell:
-        #    - Get cell's screen coordinates from x,y and square size
-        #    - Extract the cell's image from screenshot
-        #    - Compare with templates to determine state:
-        #      * Numbers (1-8)
-        #      * Empty (revealed)
-        #      * Mine (if game over)
-        #      * Flag
-        #      * Question mark
-        #      * Hidden (default)
-        #    - Update cell.state accordingly
+        # Check all templates loaded successfully
+        for name, template in templates.items():
+            if template is None:
+                print(f"Error: Could not load template {name}.png")
+                return
+            print(f"  - Loaded {name}.png: {template.shape}")
         
-        # 3. Handle special cases:
-        #    - If mine is revealed: game over
+        print("3. Processing grid cells...")
+        grid = self.get_grid_representation()
+        if not grid:
+            print("Error: Could not get grid representation")
+            return
+            
+        print(f"Grid size: {len(grid)}x{len(grid[0])}")
+        print(f"Square size: {self.square_size}")
+        
+        total_cells = 0
+        processed_cells = 0
+        state_changes = 0
+        
+        for row_idx, row in enumerate(grid):
+            for col_idx, cell in enumerate(row):
+                total_cells += 1
+                if not cell:
+                    continue
+                    
+                # Get cell region from screenshot
+                cell_region = screenshot[cell.y:cell.y+self.square_size, 
+                                      cell.x:cell.x+self.square_size]
+                
+                if cell_region.size == 0:
+                    print(f"  - Cell ({row_idx},{col_idx}): Empty region at ({cell.x},{cell.y}) - {self.square_size}x{self.square_size}")
+                    continue
+                    
+                processed_cells += 1
+                best_match = None
+                best_score = -1
+                scores = {}
+                
+                # Debug: Save cell region for first few cells
+                debug_cell = (row_idx == 0 and col_idx == 0)  # Only debug first cell
+                if debug_cell:
+                    cv2.imwrite('debug_cell.png', cell_region)
+                
+                # Compare with each template
+                for state, template in templates.items():
+                    # Resize template to match cell size
+                    template_resized = cv2.resize(template, (cell_region.shape[1], cell_region.shape[0]))
+                    
+                    # Debug: Save resized template for first cell
+                    if debug_cell:
+                        cv2.imwrite(f'debug_template_{state}.png', template_resized)
+                    
+                    # Try different matching methods
+                    try:
+                        # Method 1: Direct template matching
+                        result = cv2.matchTemplate(cell_region, template_resized, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, _ = cv2.minMaxLoc(result)
+                        
+                        # Method 2: Grayscale matching (sometimes more reliable)
+                        gray_cell = cv2.cvtColor(cell_region, cv2.COLOR_BGR2GRAY)
+                        gray_template = cv2.cvtColor(template_resized, cv2.COLOR_BGR2GRAY)
+                        result_gray = cv2.matchTemplate(gray_cell, gray_template, cv2.TM_CCOEFF_NORMED)
+                        _, max_val_gray, _, _ = cv2.minMaxLoc(result_gray)
+                        
+                        # Use the better of the two scores
+                        combined_score = max(max_val, max_val_gray)
+                        scores[state] = combined_score
+                        
+                        if combined_score > best_score:
+                            best_score = combined_score
+                            best_match = state
+                            
+                    except Exception as e:
+                        print(f"  - Error matching template {state} for cell ({row_idx},{col_idx}): {e}")
+                
+                # Debug: Show scores for first few cells
+                if processed_cells <= 5:  # Only show for first 5 cells to avoid spam
+                    print(f"  - Cell ({row_idx},{col_idx}) scores: {scores}")
+                
+                # Update cell state if we found a good match
+                threshold = 0.3  # Lower threshold since we're getting low scores
+                if best_match and best_score > threshold:  # Lowered threshold
+                    old_state = cell.state
+                    if old_state != best_match:
+                        cell.state = best_match
+                        print(f"  - Cell at ({row_idx},{col_idx}) changed from {old_state} to {best_match} (confidence: {best_score:.2f})")
+                        state_changes += 1
+        
+        print(f"\n=== Update Complete ===")
+        print(f"Processed {processed_cells}/{total_cells} cells")
+        print(f"State changes: {state_changes}")
+        
+        # Count current states
+        state_counts = {}
+        for row in grid:
+            for cell in row:
+                if cell:
+                    state_counts[cell.state] = state_counts.get(cell.state, 0) + 1
+        print("Current state counts:", state_counts)
+        
+        # 3. Handle special cases
+        # Check for game over (mine revealed)
+        # for row in grid:
+            # for cell in row:
+                # if cell and cell.state == 'mine':
+                    # self.game_state.mark_game_over(victory=False)
+                    # print("Game Over: Mine revealed!")
+                    # return
         #    - If all non-mine cells revealed: victory
         #    - Update game state based on cell states
         
@@ -242,15 +353,42 @@ class GameGrid:
         #    - Track which cells changed state
         #    - Log any significant state changes
         
-        # Placeholder implementation
-        print("Updating cell states... (not yet implemented)")
+        # Debug output for all cells and matching info
+        grid = self.get_grid_representation()
+        if grid:
+            print("\n=== Cell State Debug ===")
+            print(f"Grid size: {len(grid)}x{len(grid[0]) if grid else 0}")
+            print(f"Square size: {self.square_size}")
+            print("-" * 40)
+            
+            # Count states
+            state_counts = {}
+            for row in grid:
+                for cell in row:
+                    if cell:
+                        state_counts[cell.state] = state_counts.get(cell.state, 0) + 1
+            
+            print("State counts:", state_counts)
+            
+            # Show first few non-hidden cells
+            print("\nFirst few non-hidden cells:")
+            found = 0
+            for row_idx, row in enumerate(grid):
+                for col_idx, cell in enumerate(row):
+                    if cell and cell.state != 'hidden' and found < 5:  # Limit to first 5 for brevity
+                        print(f"Cell at ({row_idx},{col_idx}): {cell.state}")
+                        found += 1
+            if found == 0:
+                print("No non-hidden cells found")
+            print("-" * 40)
 
 # Global variables to track window position
 _window_x = 0
 _window_y = 0
 
 # Flag to track if minimize_other_windows has been called
-_minimize_called = False
+# _minimize_called = False
+_minimize_called = True
 
 # Enable DPI awareness
 try:
@@ -388,6 +526,44 @@ def find_minesweeper_window():
         print(f"Error finding Minesweeper window: {e}")
         return None
 
+def take_screenshot(window: Optional[gw.Window] = None, region: Optional[Dict[str, int]] = None, 
+                   save_path: Optional[str] = 'currentGrab.png') -> np.ndarray:
+    """
+    Take a screenshot of a window or specified region and optionally save it.
+    
+    Args:
+        window: Optional window object to capture. If None, region must be provided.
+        region: Optional dictionary with 'top', 'left', 'width', 'height' keys to specify capture area.
+               Required if window is None.
+        save_path: Optional path to save the screenshot. If None, screenshot won't be saved.
+                 
+    Returns:
+        np.ndarray: The screenshot as a BGR numpy array
+    """
+    if window is None and region is None:
+        raise ValueError("Either window or region must be provided")
+        
+    # If window is provided, use its coordinates
+    if window is not None:
+        global _window_x, _window_y
+        _window_x, _window_y = window.left, window.top
+        region = {"top": _window_y, "left": _window_x, 
+                 "width": window.width, "height": window.height}
+    
+    with mss.mss() as sct:
+        # Grab the data
+        sct_img = sct.grab(region)
+        
+        # Convert to numpy array and BGRA to BGR
+        screenshot = cv2.cvtColor(np.array(sct_img), cv2.COLOR_BGRA2BGR)
+        
+        # Save if path is provided
+        if save_path:
+            cv2.imwrite(save_path, screenshot)
+            
+    return screenshot
+
+
 def check_game_status(window, check_interval=0.5):
     """
     Check if a game is in progress by looking for the new game display.
@@ -408,27 +584,8 @@ def check_game_status(window, check_interval=0.5):
             check_game_status.grid_detector = GridSquareDetector(template_path)
             check_game_status.game_grid = GameGrid()
         
-        # Get window position and size and update globals
-        global _window_x, _window_y
-        _window_x, _window_y = window.left, window.top
-        w, h = window.width, window.height
-        
         # Take a screenshot of the window
-        with mss.mss() as sct:
-            # The screen part to capture - use window coordinates
-            monitor = {"top": _window_y, "left": _window_x, "width": w, "height": h}
-            
-            # Grab the data
-            sct_img = sct.grab(monitor)
-            
-            # Convert to numpy array
-            screenshot = np.array(sct_img)
-            
-            # Convert BGRA to BGR
-            screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
-            
-            # Save the screenshot for debugging
-            cv2.imwrite('currentGrab.png', screenshot)
+        screenshot = take_screenshot(window)
             
         # Load the new game template
         template_path = os.path.join("resources", "newGameDisplay.png")
@@ -620,8 +777,16 @@ def main_loop(game_grid: GameGrid) -> None:
     """
     print("\n=== Starting Main Game Loop ===")
     
+    window = find_minesweeper_window()
+    if not window:
+        print("Error: Could not find Minesweeper window")
+        return
+        
     while not game_grid.game_state.game_over:
         try:
+            # Update cell states from the current game screen
+            game_grid.update_cell_states(window)
+            
             # 1. Check if first turn was just played
             #    - If yes, wait for board to update and detect the revealed cells
             #    - If no, proceed with normal turn flow
