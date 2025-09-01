@@ -197,6 +197,53 @@ class GameGrid:
                     lines.append(f"CELL {row_idx:02d}{col_idx:02d} - INVALID\n")
                 
         return "\n".join(lines)
+        
+    def update_cell_states(self, window) -> None:
+        """
+        Update the state of all cells by analyzing the current game screen.
+        
+        Args:
+            window: The Minesweeper window object for screenshot region
+            
+        Process:
+            1. Take a screenshot of the game area
+            2. For each cell in the grid:
+               a. Extract the cell's region from the screenshot
+               b. Match against templates to determine state
+               c. Update the cell's state attribute
+            3. Handle special cases (flags, question marks, etc.)
+            4. Update game state based on any changes
+        """
+        if not hasattr(self, 'grid') or not self.grid:
+            return
+            
+        # 1. Take screenshot of the game area
+        #    - Use window coordinates to capture just the game board
+        #    - Consider adding a small border around each cell for better matching
+        
+        # 2. For each cell:
+        #    - Get cell's screen coordinates from x,y and square size
+        #    - Extract the cell's image from screenshot
+        #    - Compare with templates to determine state:
+        #      * Numbers (1-8)
+        #      * Empty (revealed)
+        #      * Mine (if game over)
+        #      * Flag
+        #      * Question mark
+        #      * Hidden (default)
+        #    - Update cell.state accordingly
+        
+        # 3. Handle special cases:
+        #    - If mine is revealed: game over
+        #    - If all non-mine cells revealed: victory
+        #    - Update game state based on cell states
+        
+        # 4. Log state changes for debugging
+        #    - Track which cells changed state
+        #    - Log any significant state changes
+        
+        # Placeholder implementation
+        print("Updating cell states... (not yet implemented)")
 
 # Global variables to track window position
 _window_x = 0
@@ -575,19 +622,33 @@ def main_loop(game_grid: GameGrid) -> None:
     
     while not game_grid.game_state.game_over:
         try:
-            # TODO: Add game logic here
-            # 1. Update grid state from screen
-            # 2. Count remaining hidden cells
-            # 3. Analyze board state
-            # 4. Make a move or determine game end
+            # 1. Check if first turn was just played
+            #    - If yes, wait for board to update and detect the revealed cells
+            #    - If no, proceed with normal turn flow
             
-            # Placeholder: Just print the current grid state
-            # print("\nCurrent Grid State:")
-            # print("-" * 80)
-            # print(game_grid)
-            # print("-" * 80)
+            # 2. Check if board has expanded (at least one cell with state "empty")
+            #    - Scan grid for any revealed empty cells
+            #    - If no empty cells found, it means first click didn't expand yet
             
-            # For now, just wait a bit and then exit the loop
+            # 3. If board has expanded:
+            #    - Get current state of grid (update from screen)
+            #    - Analyze board to choose next move:
+            #      * Look for safe moves (obvious mines or safe cells)
+            #      * If no obvious moves, use probability analysis
+            #    - Perform the chosen move (reveal or flag)
+            #    - Check win/lose conditions
+            #    - Call main_loop() again for next turn
+            
+            # 4. If board hasn't expanded yet:
+            #    - Wait a short time for animation
+            #    - Update grid state from screen
+            #    - Call main_loop() again to recheck
+            
+            # 5. Handle game over conditions:
+            #    - If mine hit: game over, show stats
+            #    - If all non-mine cells revealed: victory!
+            
+            # Placeholder for now - just mark game over after first turn
             print("Game logic will be implemented here. Exiting for now...")
             game_grid.game_state.mark_game_over()
             
